@@ -109,12 +109,12 @@ for i in range(K - 1):
 fltr.sort_indices()
 
 
-area_in= Lambda(lambda:area_stat_np, name="lambda_layer_area")
-fltr_in = Lambda(lambda:fltr, name="lambda_layer_fltr")
+# area_in= Lambda(lambda:area_stat_np, name="lambda_layer_area")
+# fltr_in = Lambda(lambda:fltr, name="lambda_layer_fltr")
 
 # Model definition
-# area_in = Input(shape=(F, ))
-# fltr_in = Input((N, ), sparse=True)
+area_in = Input(shape=(F, ))
+fltr_in = Input((N, ), sparse=True)
 g1 = GraphConv(embedding_vecor_length1, #first graph conv layer
                    activation='relu',
                    kernel_regularizer=l2(l2_reg),
@@ -124,7 +124,7 @@ g2 = GraphConv(N, # Second graph conv layer
                    kernel_regularizer=l2(l2_reg),
                    use_bias=False)([g1, fltr_in])
 
-model = Model(inputs=[area_in,fltr_in], outputs=[g2])
+# model = Model(inputs=[area_in,fltr_in], outputs=[g2])
 
 #print(model.output_shape)
 
@@ -156,42 +156,42 @@ model = Model(inputs=[area_in,fltr_in], outputs=[g2])
 #                               batch_size=N)
 
 
-# def gcn_to_trip(x):
-#     trip_input=x[0]
-#     graph_output=x[1]
-#     o = k.transpose(k.dot(k.transpose(trip_input[:,start_o:end_o]),k.transpose(graph_output)))
-#     d = k.transpose(k.dot(k.transpose(trip_input[:,start_d:]),k.transpose(graph_output)))
-#     t = trip_input[:,:start_o]
-#     out = k.concatenate((t,o,d),axis=-1)
-#     return out
+def gcn_to_trip(x):
+    trip_input=x
+    graph_output=g2
+    o = k.transpose(k.dot(k.transpose(trip_input[:,start_o:end_o]),k.transpose(graph_output)))
+    d = k.transpose(k.dot(k.transpose(trip_input[:,start_d:]),k.transpose(graph_output)))
+    t = trip_input[:,:start_o]
+    out = k.concatenate((t,o,d),axis=-1)
+    return out
 
 
-# trip_in = Input(shape = (trip_feature, ))
+trip_in = Input(shape = (trip_feature, ))
 
-# l1 = Lambda(gcn_to_trip, name="lambda_layer")([trip_in,g2])
+l1 = Lambda(gcn_to_trip, name="lambda_layer")(trip_in)
 
-# d1 = Dense(units=500,
-#            activation='relu',
-#            kernel_regularizer=l2(l2_reg),
-#            use_bias=True)(l1)
+d1 = Dense(units=500,
+            activation='relu',
+            kernel_regularizer=l2(l2_reg),
+            use_bias=True)(l1)
 
-# d2 = Dense(units=500,
-#            activation='relu',
-#            kernel_regularizer=l2(l2_reg),
-#            use_bias=True)(d1)
+d2 = Dense(units=500,
+            activation='relu',
+            kernel_regularizer=l2(l2_reg),
+            use_bias=True)(d1)
 
-# output = Dense(units=2,
-#            activation='softmax',
-#            kernel_regularizer=l2(l2_reg),
-#            use_bias=True)(d2)
+output = Dense(units=2,
+            activation='softmax',
+            kernel_regularizer=l2(l2_reg),
+            use_bias=True)(d2)
 
-# model = Model(inputs=[area_in, fltr_in, trip_in], outputs=output)
+model = Model(inputs=[area_in, fltr_in, trip_in], outputs=output)
 
-# optimizer = Adam(lr=learning_rate)
-# model.compile(optimizer=optimizer,
-#               loss='categorical_crossentropy',
-#               weighted_metrics=['acc'])
-# model.summary()
+optimizer = Adam(lr=learning_rate)
+model.compile(optimizer=optimizer,
+              loss='categorical_crossentropy',
+              weighted_metrics=['acc'])
+model.summary()
 
 # plot_model(model, to_file='model_plot.png', show_shapes=True, show_layer_names=True)
 
