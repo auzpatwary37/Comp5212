@@ -25,7 +25,7 @@ from tensorflow.keras.layers import Dense
 from tensorflow.keras.utils import plot_model
 
 
-from spektral.datasets import citation
+
 from spektral.layers import GraphConv
 from spektral.utils.convolution import localpooling_filter
 
@@ -40,6 +40,8 @@ train=lyft_data.sample(frac=0.8,random_state=200) #random state is a seed value
 test=lyft_data.drop(train.index)
 
 area_stat = pd.read_csv("areaStat.csv")
+
+
 
 #print(lyft_data.describe())
 
@@ -56,7 +58,7 @@ A = sparse.csr_matrix(area_A)
 # Parameters
 K = 2                   # Degree of propagation
 N = area_stat.shape[0]          # Number of nodes in the graph
-F = area_stat.shape[1]          # Original size of node features
+F = area_stat_np.shape[1]          # Original size of node features
 l2_reg = 5e-6           # L2 regularization rate
 learning_rate = 0.2     # Learning rate
 epochs = 2000         # Number of training epochs
@@ -66,40 +68,30 @@ embedding_vecor_length2 = 32
 
 
 # Get one hot encoding of columns B
-one_hot_o_train = pd.get_dummies(train['PUlocationID'], prefix='o')
-one_hot_d_train = pd.get_dummies(train['DOlocationID'], prefix='d')
+def create_data(d):
+    one_hot_o = pd.get_dummies(d['PUlocationID'], prefix='o')
+    one_hot_d = pd.get_dummies(d['DOlocationID'], prefix='d')
+    label = pd.get_dummies(d['SR_Flag'])
+    label_np = label.to_numpy().astype(np.float32)
+    d = d.drop('SR_Flag',axis = 1)
+    d = d.drop('PUlocationID',axis = 1)
+    d = d.drop('DOlocationID',axis = 1)
+    start_o = d.shape[1]
+    d = d.join(one_hot_o)
+    end_o = d.shape[1]-1
+    start_d = end_o+1
+    d = d.join(one_hot_d)
+    
+    d_np = d.to_numpy().astype(np.float32)
+    return [d_np,label_np,start_o,end_o,start_d]
+    
+[train_np,label_train_np,start_o,end_o,start_d] = create_data(train)
+[test_np,label_test_np,start_o1,end_o1,start_d1] = create_data(test)
 
-one_hot_o_test = pd.get_dummies(test['PUlocationID'], prefix='o')
-one_hot_d_test = pd.get_dummies(test['DOlocationID'], prefix='d')
 
-label_train = pd.get_dummies(train['SR_Flag'])
-label_train_np = label_train.to_numpy().astype(np.float32)
 
-label_test = pd.get_dummies(test['SR_Flag'])
-label_test_np = label_test.to_numpy().astype(np.float32)
 
-train = train.drop('SR_Flag',axis = 1)
-test = test.drop('SR_Flag',axis = 1)
-
-# Drop column B as it is now encoded
-train = train.drop('PUlocationID',axis = 1)
-test = test.drop('PUlocationID',axis = 1)
-train = train.drop('DOlocationID',axis = 1)
-test = test.drop('DOlocationID',axis = 1)
-start_o = lyft_data.shape[1]
-
-# Join the encoded df
-train = train.join(one_hot_o_train)
-test = test.join(one_hot_o_test)
-end_o = train.shape[1]-1
-start_d = end_o+1
-
-train = train.join(one_hot_d_train)
-train_np = train.to_numpy().astype(np.float32)
-test = test.join(one_hot_d_test)
-test_np = test.to_numpy().astype(np.float32)
-
-trip_feature = lyft_data.shape[1]
+trip_feature = train_np.shape[1]
 
 
 # Preprocessing operations
@@ -119,7 +111,7 @@ g1 = GraphConv(embedding_vecor_length1, #first graph conv layer
                    activation='relu',
                    kernel_regularizer=l2(l2_reg),
                    use_bias=False)([area_in, fltr_in])
-g2 = GraphConv(N, # Second graph conv layer
+g2 = GraphConv(embedding_vecor_length2, # Second graph conv layer
                    activation='softmax',
                    kernel_regularizer=l2(l2_reg),
                    use_bias=False)([g1, fltr_in])
@@ -157,33 +149,33 @@ g2 = GraphConv(N, # Second graph conv layer
 
 
 def gcn_to_trip(x):
-    trip_input=x
-    graph_output=g2
-    o = k.transpose(k.dot(k.transpose(trip_input[:,start_o:end_o]),k.transpose(graph_output)))
-    d = k.transpose(k.dot(k.transpose(trip_input[:,start_d:]),k.transpose(graph_output)))
+    trip_input=x[0]
+    graph_output=x[1]
+    o = k.dot(trip_input[:,start_o:end_o+1],graph_output)
+    d = k.dot(trip_input[:,start_d:],graph_output)
     t = trip_input[:,:start_o]
-    out = k.concatenate((t,o,d),axis=-1)
+    out = k.concatenate((t,o,d),axis=1)
+    
     return out
+
+
 
 
 trip_in = Input(shape = (trip_feature, ))
 
-l1 = Lambda(gcn_to_trip, name="lambda_layer")(trip_in)
+lam1 = Lambda(gcn_to_trip)([trip_in,g2])
 
-d1 = Dense(units=500,
+d1 = Dense(units=500,input_dim=trip_feature+embedding_vecor_length2*2,
             activation='relu',
             kernel_regularizer=l2(l2_reg),
-            use_bias=True)(l1)
+            use_bias=True)(lam1)
 
 d2 = Dense(units=500,
             activation='relu',
             kernel_regularizer=l2(l2_reg),
             use_bias=True)(d1)
 
-output = Dense(units=2,
-            activation='softmax',
-            kernel_regularizer=l2(l2_reg),
-            use_bias=True)(d2)
+output = Dense(units=2,activation='softmax')(d2)
 
 model = Model(inputs=[area_in, fltr_in, trip_in], outputs=output)
 
@@ -193,9 +185,12 @@ model.compile(optimizer=optimizer,
               weighted_metrics=['acc'])
 model.summary()
 
-# plot_model(model, to_file='model_plot.png', show_shapes=True, show_layer_names=True)
+plot_model(model, to_file='model_plot.png', show_shapes=True, show_layer_names=True)
 
 
+
+# model.fit([area_stat_np,fltr,train_np], label_train_np, epochs=3, batch_size=63)
+model.train_on_batch([area_stat_np,fltr,train_np[:63,:]], label_train_np[:63,:])
 
 # validation_data = ([area_stat_np,fltr,test_np], label_test_np)
 
