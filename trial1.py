@@ -53,7 +53,6 @@ lyft_data['DropOff_datetime'] = lyft_data['DropOff_datetime'].apply(lambda x: x.
 #read area data
 area_stat = pd.read_csv("areaStat.csv")
 
-
 #remove the area id and save the features as area_stat_np
 area_stat_np = area_stat.loc[:, area_stat.columns != 'Matching_area'].to_numpy()
 
@@ -66,14 +65,13 @@ A = sparse.csr_matrix(area_A)
     
 
 # Parameters
-
 K = 2                   # Degree of propagation (Parameter of the GCN, do not know what it means though)
 N = area_stat.shape[0]          # Number of nodes in the graph (Do not change)
 F = area_stat_np.shape[1]          # Original size of node features (Do not change)
 l2_reg = 5e-6           # L2 regularization rate
 learning_rate = 0.005     # Learning rate
 epochs = 200         # Number of training epochs
-embedding_vecor_length1 = 64
+embedding_vecor_length1 = 32
 embedding_vecor_length2 = 32
 include_batch_norm_layers = True
 include_dropout_layers = False
@@ -151,7 +149,6 @@ if not include_batch_norm_layers:
 
 ac1 = LRelu(alpha=0.3)(bn1)#activation on g1 (Chosen LickyReLU)
 
-
 g2 = GraphConv(embedding_vecor_length2, # Second graph conv layer
                    kernel_regularizer=l2(l2_reg),
                    use_bias=True)([ac1, fltr_in])
@@ -164,7 +161,9 @@ bn2 = BN(axis=-1, momentum=0.99, epsilon=0.001, center=True, scale=True,
 if not include_batch_norm_layers: 
     bn2 = g2
     
+    
 ac2 = LRelu(alpha=0.3)(bn2)#activation on g2
+
 
 def gcn_to_trip(x):#lambda function corresponding to the lambda layer
     trip_input=x[0]
@@ -173,14 +172,15 @@ def gcn_to_trip(x):#lambda function corresponding to the lambda layer
     d = k.dot(trip_input[:,start_d:],graph_output)#get area encoding from g2 corresponding to the dropoff in trip data
     t = trip_input[:,:start_o]#Get the actual trip features
     out = k.concatenate((t,o,d),axis=1)#Merge trip, pickup and dropoff features
-
+    
     return out
+
+
+
 
 trip_in = Input(shape = (trip_feature, ))#trip feature input
 
-
-lam1 = Lambda(gcn_to_trip)([trip_in,g2])#The lambda layer to apply the gcn_to_trip function
-
+lam1 = Lambda(gcn_to_trip)([trip_in,ac2])
 
 bn3 = BN(axis=-1, momentum=0.99, epsilon=0.001, center=True, scale=True,
     beta_initializer='zeros', gamma_initializer='ones',
@@ -192,7 +192,7 @@ if not include_batch_norm_layers:
 
 d1 = Dense(units=500,input_dim=trip_feature+embedding_vecor_length2*2,
             kernel_regularizer=l2(l2_reg),
-            use_bias=True)(lam1)#first dense layer
+            use_bias=True)(bn3)#first dense layer
 
 bn4 = BN(axis=-1, momentum=0.99, epsilon=0.001, center=True, scale=True,
     beta_initializer='zeros', gamma_initializer='ones',
@@ -206,10 +206,8 @@ ac3 = ReLU()(bn4)#activation on d1
 
 dr1 = Dropout(rate = .2)(ac3)#drop off on d1
 
-
 if not include_dropout_layers: 
     dr1 = ac3
-
 
 d2 = Dense(units=500,
             kernel_regularizer=l2(l2_reg),
