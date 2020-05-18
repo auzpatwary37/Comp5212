@@ -6,8 +6,7 @@ GCN + Feed Forward neural Network Model
 Feel free to tweak and play with the parameters
 And let me know which one works best. 
 All the best!!! 
-"""
-"""
+
 Created on Mon May 11 19:58:46 2020
 
 @author: ashraf
@@ -18,10 +17,11 @@ from scipy import sparse
 import keras.backend as k
 
 
-
+import tensorflow.keras as keras
 from tensorflow.keras.layers import Input
 from tensorflow.keras.models import Model
 from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.optimizers import SGD
 from tensorflow.keras.regularizers import l2
 from tensorflow.keras.layers import Lambda
 from tensorflow.keras.layers import Dense
@@ -50,6 +50,7 @@ lyft_data['Pickup_DateTime'] = lyft_data['Pickup_DateTime'].apply(lambda x: x.ti
 lyft_data['DropOff_datetime'] = lyft_data['DropOff_datetime'].apply(lambda x: x.timestamp( ))
 
 
+
 #read area data
 area_stat = pd.read_csv("areaStat.csv")
 
@@ -65,20 +66,21 @@ A = sparse.csr_matrix(area_A)
     
 
 # Parameters
-K = 2                   # Degree of propagation (Parameter of the GCN, do not know what it means though)
+K = 5                   # Degree of propagation (Parameter of the GCN, do not know what it means though)
 N = area_stat.shape[0]          # Number of nodes in the graph (Do not change)
 F = area_stat_np.shape[1]          # Original size of node features (Do not change)
-l2_reg = 5e-6           # L2 regularization rate
-learning_rate = 0.005     # Learning rate
-epochs = 200         # Number of training epochs
-embedding_vecor_length1 = 32
-embedding_vecor_length2 = 32
+l2_reg = 5e-5           # L2 regularization rate
+learning_rate = 0.0001     # Learning rate
+epochs = 10      # Number of training epochs
+embedding_vecor_length1 = 150
+embedding_vecor_length2 = 150
 include_batch_norm_layers = True
 include_dropout_layers = False
-
+deep1_layer = 200
+deep2_layer = 200
 
 # create the trip data set and devide it in test and train
-def create_data(d,frac,random_state):
+def create_data(d,frac,random_state, aug_frac = 1):
     d = d.sample(frac=1)#random shuffle
     one_hot_o = pd.get_dummies(d['PUlocationID'], prefix='o')#get the one hot area lables for pick up loacation
     one_hot_d = pd.get_dummies(d['DOlocationID'], prefix='d')#get the one hot area lables for drop off loacation
@@ -94,7 +96,12 @@ def create_data(d,frac,random_state):
     d = d.join(label_flag)#add the trip flag back
     
     train_d = d.sample(frac = frac,random_state=random_state)#divide the dataframe into train and test
+    
     test_d = d.drop(train_d.index)#divide the dataframe into train and test
+    
+    train_d = train_d.sample(frac = aug_frac, replace = True)
+    test_d = test_d.sample(frac = aug_frac, replace = True)
+    
     label_train = pd.get_dummies(train_d['SR_Flag'])#convert the trip flag into one hot
     label_test = pd.get_dummies(test_d['SR_Flag'])#convert the trip flag into one hot
     train_d = train_d.drop('SR_Flag',axis = 1)#drop the original trip flag
@@ -108,7 +115,7 @@ def create_data(d,frac,random_state):
     
     return [d_tr,l_tr,d_tst,l_ts,start_o,end_o,start_d]
     
-[train_np,label_train_np,test_np, label_test_np,start_o,end_o,start_d] = create_data(lyft_data,0.8001,200)
+[train_np,label_train_np,test_np, label_test_np,start_o,end_o,start_d] = create_data(lyft_data,0.8001,200, aug_frac = 3)
 
 #save the trip data feature vector size
 trip_feature = train_np.shape[1]
@@ -119,7 +126,6 @@ fltr = localpooling_filter(A).astype('f4')
 for i in range(K - 1):
     fltr = fltr.dot(fltr)
 fltr.sort_indices()
-
 
 
 # Model definition
@@ -136,34 +142,47 @@ bn0 = BN(axis=-1, momentum=0.99, epsilon=0.001, center=True, scale=True,
 if not include_batch_norm_layers: 
     bn0 = area_in
 
-g1 = GraphConv(embedding_vecor_length1, #first graph conv layer
+if not include_batch_norm_layers: 
+    g1 = GraphConv(embedding_vecor_length1, #first graph conv layer
+                   activation = 'relu',
                    kernel_regularizer=l2(l2_reg),
                    use_bias=True)([bn0, fltr_in])
-bn1 = BN(axis=-1, momentum=0.99, epsilon=0.001, center=True, scale=True,
-    beta_initializer='zeros', gamma_initializer='ones',
-    moving_mean_initializer='zeros', moving_variance_initializer='ones', renorm_momentum=0.99,   
-)(g1)#bathc norm on g1
-    
-if not include_batch_norm_layers: 
-    bn1 = g1
-
-ac1 = LRelu(alpha=0.3)(bn1)#activation on g1 (Chosen LickyReLU)
-
-g2 = GraphConv(embedding_vecor_length2, # Second graph conv layer
+    ac1 = g1
+else:
+    g1 = GraphConv(embedding_vecor_length1, #first graph conv layer
                    kernel_regularizer=l2(l2_reg),
-                   use_bias=True)([ac1, fltr_in])
+                   use_bias=True)([bn0, fltr_in])
+    bn1 = BN(axis=-1, momentum=0.99, epsilon=0.001, center=True, scale=True,
+        beta_initializer='zeros', gamma_initializer='ones',
+        moving_mean_initializer='zeros', moving_variance_initializer='ones', renorm_momentum=0.99,   
+    )(g1)#bathc norm on g1
+    #ac1 = LRelu(alpha=0.3)(bn1)#activation on g1 (Chosen LickyReLU)
+    ac1 = ReLU()(bn1)
 
-bn2 = BN(axis=-1, momentum=0.99, epsilon=0.001, center=True, scale=True,
-    beta_initializer='zeros', gamma_initializer='ones',
-    moving_mean_initializer='zeros', moving_variance_initializer='ones', renorm_momentum=0.99,   
-)(g2)#batch norm on g2
+dr = Dropout(rate = .1)(ac1)
 
+if not include_dropout_layers: 
+    dr = ac1
+    
 if not include_batch_norm_layers: 
-    bn2 = g2
+    g2 = GraphConv(embedding_vecor_length2, # Second graph conv layer
+                       activation = 'relu',
+                       kernel_regularizer=l2(l2_reg),
+                       use_bias=True)([dr, fltr_in])
+    ac2 = g2
     
+else:
+    g2 = GraphConv(embedding_vecor_length2, # Second graph conv layer
+                       kernel_regularizer=l2(l2_reg),
+                       use_bias=True)([dr, fltr_in])
     
-ac2 = LRelu(alpha=0.3)(bn2)#activation on g2
+    bn2 = BN(axis=-1, momentum=0.99, epsilon=0.001, center=True, scale=True,
+        beta_initializer='zeros', gamma_initializer='ones',
+        moving_mean_initializer='zeros', moving_variance_initializer='ones', renorm_momentum=0.99,   
+    )(g2)#batch norm on g2
 
+    #ac2 = LRelu(alpha=0.3)(bn2)#activation on g2
+    ac2 = ReLU()(bn2)
 
 def gcn_to_trip(x):#lambda function corresponding to the lambda layer
     trip_input=x[0]
@@ -189,41 +208,52 @@ bn3 = BN(axis=-1, momentum=0.99, epsilon=0.001, center=True, scale=True,
 
 if not include_batch_norm_layers: 
     bn3 = lam1
+    
+if not include_batch_norm_layers:  
+     d1 = Dense(units=deep1_layer,input_dim=trip_feature+embedding_vecor_length2*2,
+                activation = 'relu',
+                kernel_regularizer=l2(l2_reg),
+                use_bias=True)(bn3)#first dense layer
+     ac3 = d1
+else:
 
-d1 = Dense(units=500,input_dim=trip_feature+embedding_vecor_length2*2,
-            kernel_regularizer=l2(l2_reg),
-            use_bias=True)(bn3)#first dense layer
+    d1 = Dense(units=deep1_layer,input_dim=trip_feature+embedding_vecor_length2*2,
+                kernel_regularizer=l2(l2_reg),
+                use_bias=True)(bn3)#first dense layer
+    
+    bn4 = BN(axis=-1, momentum=0.99, epsilon=0.001, center=True, scale=True,
+        beta_initializer='zeros', gamma_initializer='ones',
+        moving_mean_initializer='zeros', moving_variance_initializer='ones', renorm_momentum=0.99,   
+    )(d1)#batch norm on d1
+    ac3 = ReLU()(bn4)#activation on d1
 
-bn4 = BN(axis=-1, momentum=0.99, epsilon=0.001, center=True, scale=True,
-    beta_initializer='zeros', gamma_initializer='ones',
-    moving_mean_initializer='zeros', moving_variance_initializer='ones', renorm_momentum=0.99,   
-)(d1)#batch norm on d1
 
-if not include_batch_norm_layers: 
-    bn4 = d1
 
-ac3 = ReLU()(bn4)#activation on d1
-
-dr1 = Dropout(rate = .2)(ac3)#drop off on d1
+dr1 = Dropout(rate = .1)(ac3)#drop off on d1
 
 if not include_dropout_layers: 
     dr1 = ac3
-
-d2 = Dense(units=500,
-            kernel_regularizer=l2(l2_reg),
-            use_bias=True)(dr1)#Second dense layer 
-
-bn5 = BN(axis=-1, momentum=0.99, epsilon=0.001, center=True, scale=True,
-    beta_initializer='zeros', gamma_initializer='ones',
-    moving_mean_initializer='zeros', moving_variance_initializer='ones', renorm_momentum=0.99,   
-)(d2)#batch norm on d2
-
+    
 if not include_batch_norm_layers: 
-    bn5 = d2
+    
+    d2 = Dense(units=deep2_layer,
+                kernel_regularizer=l2(l2_reg),
+                use_bias=True)(dr1)#Second dense layer 
+    ac4 = d2
+else:
 
-ac4 = ReLU()(bn5)#activation on d2
+    d2 = Dense(units=deep2_layer,
+                kernel_regularizer=l2(l2_reg),
+                use_bias=True)(dr1)#Second dense layer 
+    
+    bn5 = BN(axis=-1, momentum=0.99, epsilon=0.001, center=True, scale=True,
+        beta_initializer='zeros', gamma_initializer='ones',
+        moving_mean_initializer='zeros', moving_variance_initializer='ones', renorm_momentum=0.99,   
+    )(d2)#batch norm on d2
 
-dr2 = Dropout(rate = .2)(ac4)#dropoff on d2
+    ac4 = ReLU()(bn5)#activation on d2
+
+dr2 = Dropout(rate = .1)(ac4)#dropoff on d2
 
 if not include_dropout_layers: 
     dr2 = ac4
@@ -233,9 +263,9 @@ output = Dense(units=2,kernel_regularizer=l2(l2_reg),activation='softmax',use_bi
 
 model = Model(inputs=[area_in, fltr_in, trip_in], outputs=output)#Build the model
 
-optimizer = Adam(lr=learning_rate)#Set the optimizer
+optimizer = SGD(lr=learning_rate)#Set the optimizer
 model.compile(optimizer=optimizer,
-              loss='categorical_crossentropy',metrics=['accuracy'])#Compile the model
+              loss='categorical_crossentropy',metrics=['accuracy',keras.metrics.AUC(),keras.metrics.Precision(), keras.metrics.Recall()])#Compile the model
 model.summary()#Print model summary
 
 plot_model(model, to_file='model_plot.png', show_shapes=True, show_layer_names=True)#plot model as block diagram
@@ -266,7 +296,17 @@ history  = model.fit_generator(#fit the model
     epochs=epochs,
     steps_per_epoch = int(train_np.shape[0]/N)
 )
+hist_df = pd.DataFrame(history.history) 
 
+# save to json:  
+hist_json_file = 'history.json' 
+with open(hist_json_file, mode='w') as f:
+    hist_df.to_json(f)
+
+# or save to csv: 
+hist_csv_file = 'history.csv'
+with open(hist_csv_file, mode='w') as f:
+    hist_df.to_csv(f)
 #Plot training history
 plt.figure()
 plt.plot(history.history['accuracy'])
@@ -274,7 +314,7 @@ plt.plot(history.history['val_accuracy'])
 plt.title('model accuracy')
 plt.ylabel('accuracy')
 plt.xlabel('epoch')
-plt.legend(['train', 'val'], loc='upper left')
+plt.legend(['train', 'val'], loc='best')
 plt.savefig('accuracy.png', dpi=300)
 
 plt.figure()
@@ -283,7 +323,7 @@ plt.plot(history.history['val_loss'])
 plt.title('model loss')
 plt.ylabel('loss')
 plt.xlabel('epoch')
-plt.legend(['train', 'val'], loc='upper left')
+plt.legend(['train', 'val'], loc='best')
 plt.savefig('loss.png', dpi=300)
 
 
