@@ -71,11 +71,11 @@ N = area_stat.shape[0]          # Number of nodes in the graph (Do not change)
 F = area_stat_np.shape[1]          # Original size of node features (Do not change)
 l2_reg = 5e-5           # L2 regularization rate
 learning_rate = 0.0001     # Learning rate
-epochs = 10      # Number of training epochs
+epochs = 100      # Number of training epochs
 embedding_vecor_length1 = 150
 embedding_vecor_length2 = 150
 include_batch_norm_layers = True
-include_dropout_layers = False
+include_dropout_layers = True
 deep1_layer = 200
 deep2_layer = 200
 
@@ -258,14 +258,14 @@ dr2 = Dropout(rate = .1)(ac4)#dropoff on d2
 if not include_dropout_layers: 
     dr2 = ac4
 
-output = Dense(units=2,kernel_regularizer=l2(l2_reg),activation='softmax',use_bias=True)(dr2)#output softmax layer
+output = Dense(units=1,kernel_regularizer=l2(l2_reg),activation='sigmoid',use_bias=True)(dr2)#output softmax layer
 
 
 model = Model(inputs=[area_in, fltr_in, trip_in], outputs=output)#Build the model
 
 optimizer = SGD(lr=learning_rate)#Set the optimizer
 model.compile(optimizer=optimizer,
-              loss='categorical_crossentropy',metrics=['accuracy',keras.metrics.AUC(),keras.metrics.Precision(), keras.metrics.Recall()])#Compile the model
+              loss='binary_crossentropy',metrics=['accuracy',keras.metrics.AUC(),keras.metrics.Precision(), keras.metrics.Recall()])#Compile the model
 model.summary()#Print model summary
 
 plot_model(model, to_file='model_plot.png', show_shapes=True, show_layer_names=True)#plot model as block diagram
@@ -281,7 +281,7 @@ def generator(train_np, label_train_np):#data generator to feed the fitting meth
     X_batch = [area_stat_np,fltr.todense(),train_np[N*counter:N*(counter+1)]]
     y_batch = label_train_np[N*counter:N*(counter+1)]
     counter += 1
-    yield X_batch,y_batch
+    yield X_batch,y_batch[:,0]
 
     #restart counter to yeild data in the next epoch as well
     if counter >= number_of_batches:
