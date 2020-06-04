@@ -69,7 +69,7 @@ A = sparse.csr_matrix(area_A)
 K = 5                   # Degree of propagation (Parameter of the GCN, do not know what it means though)
 N = area_stat.shape[0]          # Number of nodes in the graph (Do not change)
 F = area_stat_np.shape[1]          # Original size of node features (Do not change)
-l2_reg = 5e-5           # L2 regularization rate
+l2_reg = 5e-6           # L2 regularization rate
 learning_rate = 0.0001     # Learning rate
 epochs = 100      # Number of training epochs
 embedding_vecor_length1 = 150
@@ -263,7 +263,7 @@ output = Dense(units=1,kernel_regularizer=l2(l2_reg),activation='sigmoid',use_bi
 
 model = Model(inputs=[area_in, fltr_in, trip_in], outputs=output)#Build the model
 
-optimizer = SGD(lr=learning_rate)#Set the optimizer
+optimizer = Adam(lr=learning_rate)#Set the optimizer
 model.compile(optimizer=optimizer,
               loss='binary_crossentropy',metrics=['accuracy',keras.metrics.AUC(),keras.metrics.Precision(), keras.metrics.Recall()])#Compile the model
 model.summary()#Print model summary
@@ -281,7 +281,7 @@ def generator(train_np, label_train_np):#data generator to feed the fitting meth
     X_batch = [area_stat_np,fltr.todense(),train_np[N*counter:N*(counter+1)]]
     y_batch = label_train_np[N*counter:N*(counter+1)]
     counter += 1
-    yield X_batch,y_batch[:,0]
+    yield X_batch,y_batch[:,1]
 
     #restart counter to yeild data in the next epoch as well
     if counter >= number_of_batches:
